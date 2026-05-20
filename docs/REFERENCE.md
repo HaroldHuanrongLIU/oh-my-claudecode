@@ -8,9 +8,10 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 
 - [Installation](#installation)
 - [Configuration](#configuration)
+- [Runtime storage and goal artifacts](#runtime-storage-and-goal-artifacts)
 - [Plugin directory flags](#plugin-directory-flags)
 - [CLI Commands: ask/team/session](#cli-commands-askteamsession)
-- [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated)
+- [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated-opt-in-only)
 - [Agents (29 Total)](#agents-29-total)
 - [Goal Workflow UX: `/goal`, Ralph, Team, UltraQA, Ultragoal](#goal-workflow-ux-goal-ralph-team-ultraqa-ultragoal)
 - [Skills (38 Total)](#skills-38-total)
@@ -246,6 +247,47 @@ Tag behavior:
 - Telegram: `alice` is normalized to `@alice`
 - Discord: supports `@here`, `@everyone`, numeric user IDs (`<@id>`), and role tags (`role:<id>` -> `<@&id>`)
 - `file` callbacks ignore tag options
+
+---
+
+## Runtime storage and goal artifacts
+
+OMC documentation should describe goal and workflow artifacts by their logical role first, then map that role to the runtime-specific storage root. Do not treat `.omx/` as a universal path: it is the legacy OMX runtime root, while OMC uses `.omc/` for local project state.
+
+### Runtime root mapping
+
+| Runtime                      | Project-local root     | User/global root            | Notes                                                                                                                                                   |
+| ---------------------------- | ---------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OMC                          | `.omc/`                | `~/.omc/`                   | Canonical OMC storage for project-local state, plans, notepads, logs, research, and ask artifacts.                                                      |
+| OMX compatibility/runtime-v1 | `.omx/`                | `~/.omx/`                   | Compatibility root for older OMX sessions and cross-runtime handoffs. Mention only when documenting OMX-specific behavior.                              |
+| OMO native                   | runtime-owned OMO path | runtime-owned OMO user path | OMO-native storage is owned by that runtime. OMC docs should name the logical artifact role unless an OMO command explicitly documents a concrete path. |
+
+### Logical goal artifact roles
+
+Use these names when writing docs or handoffs so the same concept remains portable across OMC, OMX compatibility, and OMO-native runtimes:
+
+| Logical role            | OMC path                                                                   | OMX compatibility path                                                     | Purpose                                                                                                                                                                            |
+| ----------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Goal/spec artifact      | `.omc/specs/<slug>.md` or `.omc/plans/<slug>.md`                           | `.omx/specs/<slug>.md` or `.omx/plans/<slug>.md`                           | Durable statement of the user goal, constraints, acceptance criteria, and execution handoff.                                                                                       |
+| Approved execution plan | `.omc/plans/<slug>.md`                                                     | `.omx/plans/<slug>.md`                                                     | Reviewed implementation plan consumed by execution workflows such as team or ralph.                                                                                                |
+| Task/runtime state      | `.omc/state/<mode>.json` or `.omc/state/sessions/<session-id>/<mode>.json` | `.omx/state/<mode>.json` or `.omx/state/sessions/<session-id>/<mode>.json` | Machine-readable workflow state. Session-scoped state wins over legacy flat files when present.                                                                                    |
+| Team coordination state | `.omc/state/team/<team-name>/...`                                          | `.omx/state/team/<team-name>/...`                                          | Worker task files, mailbox, status, events, and dispatch metadata. Worktree-backed workers should use `OMC_TEAM_STATE_ROOT`/compat env to find the leader-owned coordination root. |
+| Ask/advisor artifacts   | `.omc/artifacts/ask/<provider>-<slug>-<timestamp>.md`                      | `.omx/artifacts/ask/<provider>-<slug>-<timestamp>.md`                      | Persisted advisor output from `omc ask` or compatibility wrappers.                                                                                                                 |
+| Plan-scoped notepad     | `.omc/notepads/<plan-name>/`                                               | `.omx/notepads/<plan-name>/`                                               | Durable notes gathered while planning or executing a named goal.                                                                                                                   |
+| Project memory          | `.omc/project-memory.json` and `.omc/notepad.md`                           | `.omx/project-memory.json` and `.omx/notepad.md`                           | Reusable project facts and session notes.                                                                                                                                          |
+
+When an environment variable such as `OMC_STATE_DIR` centralizes storage, resolve the OMC project-local root through that setting before expanding the paths above. In docs, phrase this as "the OMC state root" or "the team coordination root" when the exact filesystem path may vary.
+
+### `/goal` interoperability notes
+
+Claude Code's `/goal` feature owns its hidden goal state. OMC integrations should not mutate hidden Claude Code goal storage directly. When OMC needs a goal-related artifact, create or update an explicit OMC artifact such as `.omc/specs/<slug>.md`, `.omc/plans/<slug>.md`, or `.omc/state/<mode>.json` and record any `/goal` relationship as metadata or prose in that artifact.
+
+For cross-runtime handoffs:
+
+- Prefer logical names such as "approved execution plan" or "team coordination root" over hardcoded `.omx/...` paths.
+- Use `.omc/...` examples for OMC-facing docs and commands.
+- Use `.omx/...` examples only for OMX compatibility behavior.
+- For OMO-native behavior, link to or quote the OMO command's documented path instead of inventing an OMC/OMX path.
 
 ---
 
@@ -612,33 +654,33 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 
 Most installed skills are exposed as `/oh-my-claudecode:<skill-name>`. Deep Interview is intentionally documented with the short `/deep-interview` path because that path receives OMC's rendered runtime threshold guidance before the interview starts. The skills table above is the full runtime-backed list; the commands below highlight common entrypoints and aliases. Compatibility keyword modes like `deep-analyze` and `tdd` are prompt-triggered behaviors, not standalone slash commands.
 
+| Command                                                  | Description                                                                                   |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `/oh-my-claudecode:ai-slop-cleaner <target>`             | Run the anti-slop cleanup workflow (`--review` for reviewer-only pass)                        |
+| `/oh-my-claudecode:ask <claude\|codex\|gemini> <prompt>` | Route a prompt through the selected advisor CLI and capture an ask artifact                   |
+| `/oh-my-claudecode:autopilot <task>`                     | Full autonomous execution                                                                     |
+| `/oh-my-claudecode:configure-notifications`              | Configure notification integrations                                                           |
+| `/oh-my-claudecode:deep-dive <problem>`                  | Run the trace → deep-interview pipeline                                                       |
+| `/deep-interview <idea>`                                 | Socratic interview with ambiguity scoring before execution                                    |
+| `/oh-my-claudecode:deepinit [path]`                      | Index codebase with hierarchical AGENTS.md files                                              |
+| `/oh-my-claudecode:mcp-setup`                            | Configure MCP servers                                                                         |
+| `/oh-my-claudecode:omc-doctor`                           | Diagnose and fix installation issues                                                          |
+| `/oh-my-claudecode:plan <description>`                   | Start planning session (supports consensus structured deliberation)                           |
+| `/oh-my-claudecode:omc-setup`                            | One-time setup wizard                                                                         |
+| `/oh-my-claudecode:omc-teams <N>:<agent> <task>`         | Spawn `claude`/`codex`/`gemini` tmux workers for legacy parallel execution                    |
+| `/oh-my-claudecode:project-session-manager <arguments>`  | Manage isolated dev environments with git worktrees + tmux                                    |
+| `/oh-my-claudecode:psm <arguments>`                      | Deprecated alias for project session manager                                                  |
+| `/oh-my-claudecode:ralph <task>`                         | Self-referential loop until task completion (`--critic=architect \| critic \| codex`)       |
+| `/oh-my-claudecode:ralplan <description>`                | Iterative planning with consensus structured deliberation (`--deliberate` for high-risk mode) |
+| `/oh-my-claudecode:release`                              | Automated release workflow                                                                    |
+| `/oh-my-claudecode:setup`                                | Unified setup entrypoint (`setup`, `setup doctor`, `setup mcp`)                               |
+| `/oh-my-claudecode:sciomc <topic>`                       | Parallel research orchestration                                                               |
+| `/oh-my-claudecode:team <N>:<agent> <task>`              | Coordinated native team workflow                                                              |
+| `/oh-my-claudecode:trace`                                | Evidence-driven tracing lane that orchestrates parallel tracer hypotheses in team mode        |
+| `/oh-my-claudecode:ultraqa <goal>`                       | Autonomous QA cycling workflow                                                                |
+| `/oh-my-claudecode:ultrawork <task>`                     | Maximum performance mode with parallel agents                                                 |
+| `/oh-my-claudecode:visual-verdict <task>`                | Structured visual QA verdict for screenshot/reference comparisons                             |
 
-| Command                                     | Description                                                                                   |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `/oh-my-claudecode:ai-slop-cleaner <target>`    | Run the anti-slop cleanup workflow (`--review` for reviewer-only pass)                    |
-| `/oh-my-claudecode:ask <claude\|codex\|gemini> <prompt>` | Route a prompt through the selected advisor CLI and capture an ask artifact         |
-| `/oh-my-claudecode:autopilot <task>`            | Full autonomous execution                                                                  |
-| `/oh-my-claudecode:configure-notifications`     | Configure notification integrations                                                       |
-| `/oh-my-claudecode:deep-dive <problem>`         | Run the trace → deep-interview pipeline                                                   |
-| `/deep-interview <idea>`                      | Socratic interview with ambiguity scoring before execution                                 |
-| `/oh-my-claudecode:deepinit [path]`             | Index codebase with hierarchical AGENTS.md files                                           |
-| `/oh-my-claudecode:mcp-setup`                   | Configure MCP servers                                                                      |
-| `/oh-my-claudecode:omc-doctor`                  | Diagnose and fix installation issues                                                       |
-| `/oh-my-claudecode:plan <description>`          | Start planning session (supports consensus structured deliberation)                        |
-| `/oh-my-claudecode:omc-setup`                   | One-time setup wizard                                                                      |
-| `/oh-my-claudecode:omc-teams <N>:<agent> <task>`       | Spawn `claude`/`codex`/`gemini` tmux workers for legacy parallel execution                |
-| `/oh-my-claudecode:project-session-manager <arguments>` | Manage isolated dev environments with git worktrees + tmux                         |
-| `/oh-my-claudecode:psm <arguments>`             | Deprecated alias for project session manager                                               |
-| `/oh-my-claudecode:ralph <task>`                | Self-referential loop until task completion (`--critic=architect|critic|codex`)           |
-| `/oh-my-claudecode:ralplan <description>`       | Iterative planning with consensus structured deliberation (`--deliberate` for high-risk mode) |
-| `/oh-my-claudecode:release`                     | Automated release workflow                                                                 |
-| `/oh-my-claudecode:setup`                       | Unified setup entrypoint (`setup`, `setup doctor`, `setup mcp`)                           |
-| `/oh-my-claudecode:sciomc <topic>`              | Parallel research orchestration                                                            |
-| `/oh-my-claudecode:team <N>:<agent> <task>`     | Coordinated native team workflow                                                           |
-| `/oh-my-claudecode:trace`                       | Evidence-driven tracing lane that orchestrates parallel tracer hypotheses in team mode     |
-| `/oh-my-claudecode:ultraqa <goal>`              | Autonomous QA cycling workflow                                                             |
-| `/oh-my-claudecode:ultrawork <task>`            | Maximum performance mode with parallel agents                                              |
-| `/oh-my-claudecode:visual-verdict <task>`       | Structured visual QA verdict for screenshot/reference comparisons                          |
 
 ### Skill Pipeline Metadata (Preview)
 
@@ -696,8 +738,6 @@ OMC registers 20 hook scripts across 11 Claude Code lifecycle events. For detail
 | **SessionEnd**         | `session-end.mjs`                                                                                                 | 30s              |
 
 > **Note**: autopilot, ralph, ultrawork, and ultraqa are **skills** (activated via keyword-detector), not hooks. The `persistent-mode.cjs` hook enforces their continuation by blocking the Stop event.
-
-### Code Simplifier Hook
 
 ### Code Simplifier Hook
 
