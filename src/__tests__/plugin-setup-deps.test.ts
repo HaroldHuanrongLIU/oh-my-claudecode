@@ -99,14 +99,15 @@ describe('plugin-setup.mjs hook command portability', () => {
   // Tests behavior, not source shape: a cosmetic reformat of the source
   // does not break these tests; a real behavior regression does.
   const UNIX_PREFIX =
-    '"/bin/sh" "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ';
+    'sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ';
+  const WINDOWS_PREFIX = 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs ';
 
   /** Run one command string through the same patching rules as plugin-setup.mjs. */
   function patchCommand(cmd: string, prefix = UNIX_PREFIX): string {
     const findNodePattern =
       /^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/find-node\.sh" "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/([^"]+)"(.*)$/;
     const currentFindNodePattern =
-      /^"\/bin\/sh" "\$CLAUDE_PLUGIN_ROOT"\/scripts\/find-node\.sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs "\$CLAUDE_PLUGIN_ROOT"\/scripts\/([^\s]+)(.*)$/;
+      /^(?:"\/bin\/sh"|sh) "\$CLAUDE_PLUGIN_ROOT"\/scripts\/find-node\.sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs "\$CLAUDE_PLUGIN_ROOT"\/scripts\/([^\s]+)(.*)$/;
 
     if (cmd.startsWith('node ') && cmd.includes('/scripts/run.cjs')) {
       return cmd.replace(/^node\s+"\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs\s+/, prefix);
@@ -124,7 +125,7 @@ describe('plugin-setup.mjs hook command portability', () => {
     return cmd;
   }
 
-  it('leaves the canonical /bin/sh+find-node+run.cjs command unchanged', () => {
+  it('leaves the canonical sh+find-node+run.cjs command unchanged', () => {
     const canonical =
       `${UNIX_PREFIX}"$CLAUDE_PLUGIN_ROOT"/scripts/keyword-detector.mjs`;
     expect(patchCommand(canonical)).toBe(canonical);
@@ -148,12 +149,64 @@ describe('plugin-setup.mjs hook command portability', () => {
     );
   });
 
+  it('keeps source hook commands portable with sh rather than absolute /bin/sh', () => {
+    const source =
+      `${UNIX_PREFIX}"$CLAUDE_PLUGIN_ROOT"/scripts/keyword-detector.mjs`;
+
+    expect(source).not.toContain('/bin/sh');
+    expect(patchCommand(source)).toBe(source);
+  });
+
   it('self-heals an absolute node path baked in at publish time', () => {
     const absolute =
       '"/opt/hostedtoolcache/node/20.0.0/x64/bin/node" "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/keyword-detector.mjs';
     const result = patchCommand(absolute);
     expect(result).toBe(
       `${UNIX_PREFIX}"$CLAUDE_PLUGIN_ROOT"/scripts/keyword-detector.mjs`,
+    );
+  });
+
+  it('keeps generated SessionEnd hooks native-Windows safe without sh', () => {
+    const sessionEnd =
+      'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-end.mjs';
+    const wikiSessionEnd =
+      'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/wiki-session-end.mjs';
+
+    expect(patchCommand(sessionEnd, WINDOWS_PREFIX)).toBe(sessionEnd);
+    expect(patchCommand(wikiSessionEnd, WINDOWS_PREFIX)).toBe(wikiSessionEnd);
+    expect(sessionEnd).not.toContain('sh ');
+    expect(wikiSessionEnd).not.toContain('sh ');
+  });
+
+  it('normalizes every bundled sh/find-node hook command to direct node on Windows', () => {
+    const hooksJson = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'hooks', 'hooks.json'), 'utf-8')) as {
+      hooks: Record<string, Array<{ hooks: Array<{ command?: string }> }>>;
+    };
+    const commands = Object.entries(hooksJson.hooks).flatMap(([event, groups]) =>
+      groups.flatMap(group =>
+        group.hooks
+          .map(hook => hook.command)
+          .filter((command): command is string => typeof command === 'string')
+          .map(command => ({ event, command })),
+      ),
+    );
+
+    expect(commands.length).toBeGreaterThan(0);
+    for (const { event, command } of commands) {
+      const patched = patchCommand(command, WINDOWS_PREFIX);
+      expect(patched, event).toMatch(/^node "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs /);
+      expect(patched, event).not.toContain('find-node.sh');
+      expect(patched, event).not.toContain('/bin/sh');
+      expect(patched, event).not.toMatch(/^sh /);
+    }
+  });
+
+  it('normalizes current sh find-node commands to node run.cjs on Windows', () => {
+    const current =
+      'sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-end.mjs';
+
+    expect(patchCommand(current, WINDOWS_PREFIX)).toBe(
+      'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-end.mjs',
     );
   });
 });
