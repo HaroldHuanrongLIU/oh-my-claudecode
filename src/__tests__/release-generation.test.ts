@@ -150,6 +150,9 @@ describe('release generation', () => {
     expect(workflow).toContain('GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}');
     expect(workflow).not.toContain('generate_release_notes: true');
     expect(workflow).not.toContain('grep');
+    expect(workflow).toContain(
+      'uses: actions/checkout@v4\n        with:\n          fetch-depth: 0',
+    );
 
     const install = stepIndex('Install dependencies');
     const trigger = stepIndex('Assert release trigger and npm availability');
